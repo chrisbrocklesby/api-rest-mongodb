@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 
 // Fetch Routes
+import baseRoutes from './modules/base/base.routes.js';
 import postRoutes from './modules/posts/post.routes.js';
 import userRoutes from './modules/users/user.routes.js';
 import errorRoutes from './modules/errors/error.routes.js';
@@ -17,6 +18,7 @@ app.use(express.static('../client/public'));
 app.use(cookieParser(process.env.COOKIE_KEY));
 
 // Routes
+baseRoutes(app);
 postRoutes(app);
 userRoutes(app);
 errorRoutes(app);
