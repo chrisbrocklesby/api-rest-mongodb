@@ -4,7 +4,7 @@ import auth from '../../commons/auth.js';
 export default (route) => {
   route.get('/posts', auth, async (request, response, next) => {
     try {
-      const data = await postServices.index();
+      const data = await postServices.index(request.query.nextFrom);
       response.json({ data });
     } catch (error) {
       next(error);

@@ -1,4 +1,5 @@
 import * as userServices from './user.services.js';
+import auth from '../../commons/auth.js';
 
 export default (route) => {
   route.post('/users/register', async (request, response, next) => {
@@ -47,6 +48,16 @@ export default (route) => {
   route.post('/users/resetpassword', async (request, response, next) => {
     try {
       const data = await userServices.resetPassword(request.body);
+      response.json({ data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  route.patch('/users/update', auth, async (request, response, next) => {
+    try {
+      const userId = request.user._id;
+      const data = await userServices.update(userId, request.body);
       response.json({ data });
     } catch (error) {
       next(error);

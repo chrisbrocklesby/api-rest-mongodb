@@ -1,53 +1,36 @@
-import { Client, ObjectId } from '../../db.js';
+import * as postRepository from './post.repository.js';
 
-export const index = async () => {
-  const client = await Client();
-  const data = await client.db().collection('posts').find().toArray();
-
-  client.close();
-  return data;
+export const index = async (nextFrom) => {
+  const query = await postRepository.index(nextFrom);
+  return query;
 };
 
 export const find = async (_id) => {
-  const client = await Client();
-  const data = await client.db().collection('posts').findOne({ _id: ObjectId(_id) });
-
-  client.close();
-  return data;
+  const query = await postRepository.findById(_id);
+  return query;
 };
 
 export const create = async (payload) => {
-  const client = await Client();
-  const data = await client.db().collection('posts')
-    .insertOne({
-      title: payload.title,
-      body: payload.body,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-  client.close();
-  return data;
+  const query = await postRepository.insert(payload);
+  return query;
 };
 
 export const update = async (_id, payload) => {
-  const client = await Client();
-  const data = await client.db().collection('posts')
-    .updateOne({ _id: ObjectId(_id) }, { $set: { payload } });
+  const data = payload || {};
 
-  if (data.matchedCount === 0) { throw Object({ name: 'badRequest', message: 'Post not found' }); }
+  delete data._id;
+  delete data.updatedAt;
+  delete data.createdAt;
 
-  client.close();
+  const query = await postRepository.update(_id, data);
+  if (!query) { throw Object({ name: 'notFound', message: 'Post not found' }); }
+
   return { status: 'ok', message: 'Post updated' };
 };
 
 export const remove = async (_id) => {
-  const client = await Client();
-  const data = await client.db().collection('posts')
-    .deleteOne({ _id: ObjectId(_id) });
+  const query = await postRepository.remove(_id);
+  if (!query) { throw Object({ name: 'notFound', message: 'Post not found' }); }
 
-  if (data.deletedCount === 0) { throw Object({ name: 'badRequest', message: 'Post not found' }); }
-
-  client.close();
   return { status: 'ok', message: 'Post deleted' };
 };

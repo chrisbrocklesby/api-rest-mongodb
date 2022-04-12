@@ -1,25 +1,22 @@
 import bcrypt from 'bcrypt';
-import { Client, ObjectId } from '../../db.js';
+import * as userRepository from './user.repository.js';
 import sendEmail from '../../commons/email.js';
 
 const generateToken = () => `${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`;
 
 export const register = async (payload) => {
-  const client = await Client();
-  const emailExists = !!(await client.collection('users').findOne({ email: payload.email }));
+  const emailExists = !!(await userRepository.findByEmail(payload.email));
 
   if (emailExists) { throw Object({ name: 'badRequest', message: 'Email already exists' }); }
 
   const token = `email_${generateToken()}`;
 
-  await client.db().collection('users').insertOne({
+  await userRepository.insert({
     email: payload.email,
     password: await bcrypt.hash(payload.password, 10),
     emailVerified: false,
     token,
     sessions: [],
-    createdAt: new Date(),
-    updatedAt: new Date(),
   });
 
   sendEmail({
@@ -28,14 +25,11 @@ export const register = async (payload) => {
     text: `Verify your email ${payload.email} with token: ${token}`,
   });
 
-  await client.close();
-
   return { status: 'ok', message: 'User registered successfully' };
 };
 
 export const login = async (payload) => {
-  const client = await Client();
-  const user = await client.db().collection('users').findOne({ email: payload.email });
+  const user = await userRepository.findByEmail(payload.email);
 
   if (!user) { throw Error('BadRequest: User not found'); }
   if (!(await bcrypt.compare(payload.password, user.password))) { throw Object({ name: 'authError', message: 'Invalid password' }); }
@@ -44,14 +38,10 @@ export const login = async (payload) => {
   const session = generateToken();
   const sessions = [session, user.sessions[0], user.sessions[1]].filter((empty) => empty);
 
-  await client.db().collection('users').updateOne({ email: payload.email }, {
-    $set: {
-      sessions,
-      updatedAt: new Date(),
-    },
+  await userRepository.update(user._id, {
+    sessions,
   });
 
-  client.close();
   return { sessionId: `${user._id}.${session}` };
 };
 
@@ -59,50 +49,38 @@ export const auth = async (sessionId) => {
   if (!sessionId) { throw Error('Auth: Session ID is required'); }
 
   const session = sessionId.split('.');
-  const client = await Client();
-  const user = await client.db().collection('users').findOne({ _id: ObjectId(session[0]) });
+  const user = await userRepository.findById(session[0]);
   if (!user.sessions.includes(session[1])) { throw Error('Auth: Invalid session'); }
 
-  client.close();
-
-  return { userId: user._id };
+  return { _id: user._id };
 };
 
 export const verifyEmail = async (payload) => {
-  const client = await Client();
-  const user = await client.db().collection('users').findOne({ email: payload.email });
+  const user = await userRepository.findByEmail(payload.email);
 
   if (!user) { throw Error('BadRequest: User not found'); }
   if (user.emailVerified) { throw Error('BadRequest: Email is already verified'); }
   if (!payload.token || user.token !== payload.token) { throw Error('Auth: Invalid token'); }
   if (!user.token.includes('email')) { throw Error('Auth: Invalid token type'); }
 
-  await client.db().collection('users').updateOne({ email: payload.email }, {
-    $set: {
-      emailVerified: true,
-      token: null,
-      updatedAt: new Date(),
-    },
+  await userRepository.update(user._id, {
+    emailVerified: true,
+    token: null,
   });
 
-  client.close();
   return { status: 'ok', message: 'User email has been verified' };
 };
 
 export const forgotPassword = async (payload) => {
-  const client = await Client();
-  const user = await client.db().collection('users').findOne({ email: payload.email });
+  const user = await userRepository.findByEmail(payload.email);
 
   if (!user) { throw Error('User not found'); }
   if (!user.emailVerified) { throw Error('Email not verified'); }
 
   const token = `password_${generateToken()}`;
 
-  await client.db().collection('users').updateOne({ email: payload.email }, {
-    $set: {
-      token,
-      updatedAt: new Date(),
-    },
+  await userRepository.update(user._id, {
+    token,
   });
 
   sendEmail({
@@ -111,47 +89,62 @@ export const forgotPassword = async (payload) => {
     text: `Reset email ${payload.email} password with token: ${token}`,
   });
 
-  client.close();
   return { status: 'ok', message: 'User emailed reset request' };
 };
 
 export const resetPassword = async (payload) => {
-  const client = await Client();
-  const user = await client.db().collection('users').findOne({ email: payload.email });
+  const user = await userRepository.findByEmail(payload.email);
 
   if (!user) { throw Error('User not found'); }
   if (!user.emailVerified) { throw Error('Email not verified'); }
   if (!payload.token || user.token !== payload.token) { throw Error('Invalid token'); }
   if (!user.token.includes('password')) { throw Error('Invalid token type'); }
 
-  await client.db().collection('users').updateOne({ email: payload.email }, {
-    $set: {
-      password: await bcrypt.hash(payload.password, 10),
-      token: null,
-      updatedAt: new Date(),
-    },
+  await userRepository.update(user._id, {
+    password: await bcrypt.hash(payload.password, 10),
+    token: null,
   });
 
-  client.close();
   return { status: 'ok', message: 'User password has been reset' };
 };
 
 export const logout = async (sessionId) => {
   if (!sessionId) { throw Error('Session ID is required'); }
   const session = sessionId.split('.');
-  const client = await Client();
-  const user = await client.db().collection('users').findOne({ _id: ObjectId(session[0]) });
+  const user = await userRepository.findById(session[0]);
+  if (!user) { throw Object({ name: 'notFound', message: 'User not found' }); }
   if (!user.sessions.includes(session[1])) { throw Error('Invalid session'); }
 
   const sessions = user.sessions.filter(((filter) => filter !== session[1]));
+  await userRepository.update(user._id, { sessions });
 
-  await client.db().collection('users').updateOne({ _id: ObjectId(user._id) }, {
-    $set: {
-      sessions,
-      updatedAt: new Date(),
-    },
-  });
-
-  client.close();
   return { status: 'ok', message: 'User logged out' };
+};
+
+export const update = async (_id, payload) => {
+  const data = payload || {};
+
+  delete data._id;
+  delete data.token;
+  delete data.sessions;
+  delete data.updatedAt;
+  delete data.createdAt;
+
+  if (data.password) { data.password = await bcrypt.hash(data.password, 10); }
+  if (data.email) {
+    const token = `email_${generateToken()}`;
+    data.emailVerified = false;
+    data.token = token;
+
+    sendEmail({
+      to: data.email,
+      subject: 'Email Verification',
+      text: `Verify your email ${data.email} with token: ${token}`,
+    });
+  }
+
+  const query = await userRepository.update(_id, data);
+  if (!query) { throw Object({ name: 'notFound', message: 'User not found' }); }
+
+  return { status: 'ok', message: 'User has been updated' };
 };
